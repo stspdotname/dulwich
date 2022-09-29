@@ -69,6 +69,8 @@ CAPABILITY_AGENT = b"agent"
 CAPABILITY_SYMREF = b"symref"
 CAPABILITY_ALLOW_TIP_SHA1_IN_WANT = b"allow-tip-sha1-in-want"
 CAPABILITY_ALLOW_REACHABLE_SHA1_IN_WANT = b"allow-reachable-sha1-in-want"
+CAPABILITY_FETCH = b"fetch"
+CAPABILITY_FILTER = b"filter"
 
 # Magic ref that is used to attach capabilities to when
 # there are no refs. Should always be ste to ZERO_SHA.
@@ -95,6 +97,7 @@ KNOWN_UPLOAD_CAPABILITIES = set(
         CAPABILITY_DEEPEN_RELATIVE,
         CAPABILITY_ALLOW_TIP_SHA1_IN_WANT,
         CAPABILITY_ALLOW_REACHABLE_SHA1_IN_WANT,
+        CAPABILITY_FETCH,
     ]
 )
 KNOWN_RECEIVE_CAPABILITIES = set(
@@ -206,7 +209,7 @@ class Protocol(object):
         This method may read from the readahead buffer; see unread_pkt_line.
 
         Returns: The next string from the stream, without the length prefix, or
-            None for a flush-pkt ('0000').
+            None for a flush-pkt ('0000') or delim-pkt ('0001').
         """
         if self._readahead is None:
             read = self.read
@@ -219,7 +222,7 @@ class Protocol(object):
             if not sizestr:
                 raise HangupException()
             size = int(sizestr, 16)
-            if size == 0:
+            if size == 0 or size == 1:  # flush-pkt or delim-pkt
                 if self.report_activity:
                     self.report_activity(4, "read")
                 return None

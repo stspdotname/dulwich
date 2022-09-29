@@ -247,6 +247,12 @@ class cmd_clone(Command):
         parser.add_option(
             "--depth", dest="depth", type=int, help="Depth at which to fetch"
         )
+        parser.add_option(
+            "--refspec", dest="refspec", type=str, help="References to fetch", action="append"
+        )
+        parser.add_option(
+            "--filter", dest="filter_spec", type=str, help="git-rev-list-style object filter"
+        )
         options, args = parser.parse_args(args)
 
         if args == []:
@@ -259,7 +265,8 @@ class cmd_clone(Command):
         else:
             target = None
 
-        porcelain.clone(source, target, bare=options.bare, depth=options.depth)
+        porcelain.clone(source, target, bare=options.bare, depth=options.depth,
+            refspec=options.refspec, filter_spec=options.filter_spec)
 
 
 class cmd_commit(Command):
@@ -540,13 +547,13 @@ class cmd_pack_objects(Command):
 
 class cmd_pull(Command):
     def run(self, args):
-        parser = optparse.OptionParser()
-        options, args = parser.parse_args(args)
-        try:
-            from_location = args[0]
-        except IndexError:
-            from_location = None
-        porcelain.pull(".", from_location)
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--from_location', type=str)
+        parser.add_argument('--refspec', type=str, nargs='*')
+        parser.add_argument('--filter', type=str, nargs=1)
+        args = parser.parse_args(args)
+        porcelain.pull(".", args.from_location or None, args.refspec or None,
+            filter_spec=args.filter)
 
 
 class cmd_push(Command):
