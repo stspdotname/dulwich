@@ -170,16 +170,95 @@ def pkt_line(data):
     return ("%04x" % (len(data) + 4)).encode("ascii") + data
 
 
-class Protocol:
-    """Class for interacting with a remote git process over the wire.
+FLUSH_PKT_LEN = 0
+DELIM_PKT_LEN = 1
+RESPONSE_END_PKT_LEN = 2
+
+
+class PktLine:
+    """Class which represents a parsed Git protocol pkt-line.
 
     Parts of the git wire protocol use 'pkt-lines' to communicate. A pkt-line
     consists of the length of the line as a 4-byte hex string, followed by the
     payload data. The length includes the 4-byte header. The special line
     '0000' indicates the end of a section of input and is called a 'flush-pkt'.
 
-    For details on the pkt-line format, see the cgit distribution:
+    Git protocol v2 adds the special line '0001' as an aditional delimiter
+    ('delim-pkt') which is used to separate sections of a message.
+
+    Additionally, Git protocol v2 defines line '0002' as the 'response-end-pkt'
+    which is only used internally by gitremote-helpers(7) and never appears
+    on the wire. Therefore, this implementation treats '0002' as invalid.
+
+    The length of the payload can be obtained by calling len().
+
+    The payload can be obtained by the casting the PktLine object to bytes()
+    or by reading the 'data' member. This will be None in case of a flush-pkt
+    or a delim-pkt, otherwise there will be a bytestring.
+
+    For convenience, several str class interfaces and iter() are also supported,
+    to support Dulwich code written when parsed pkt-lines were just bytestrings.
+
+    For details on the pkt-line format, see this file in the cgit distribution:
         Documentation/technical/protocol-common.txt
+
+    For details on Git Protocol v2, see this file in the cgit distribution:
+        Documentation/gitprotocol-v2.txt
+    """
+    def __init__(self, size, data=None):
+        if size < 4:
+            if size != FLUSH_PKT_LEN and size != DELIM_PKT_LEN:
+                raise ValueError("short pkt-line")
+            self.size = size
+            self.data = None
+        else:
+            self.size = len(data) + 4
+            self.data = data
+
+    def is_flush_pkt(self):
+        "Determine whether this pkt-line is a flush-pkt." 
+        return self.size == FLUSH_PKT_LEN
+
+    def is_delim_pkt(self):
+        "Determine whether this pkt-line is a delim-pkt." 
+        return self.size == DELIM_PKT_LEN
+
+    def __len__(self):
+        "Obtain the length of the pkt-line payload in the 'data' member."
+        if self.size == FLUSH_PKT_LEN or self.size == DELIM_PKT_LEN:
+            return 0
+        elif self.size < 4:
+            raise ValueError("short pkt-line")
+        return self.size - 4
+
+    def __bytes__(self):
+        return self.data
+
+    def __iter__(self):
+        if self.data is None:
+            return b"".__iter__()
+        return self.data.__iter__()
+
+    def startswith(self, s):
+        return self.data.startswith(s)
+
+    def split(self, sep=None, maxsplit=-1):
+        return self.data.split(sep, maxsplit)
+
+    def rsplit(self, sep=None, maxsplit=-1):
+        return self.data.rsplit(sep, maxsplit)
+
+    def strip(self, chars=None):
+        return self.data.strip(chars)
+
+    def rstrip(self, chars=None):
+        return self.data.rstrip(chars)
+
+
+class Protocol:
+    """Class for interacting with a remote git process over the wire.
+
+    This class can be used for Git protocol versions 0, 1, and 2.
     """
 
     def __init__(self, read, write, close=None, report_activity=None):
@@ -204,8 +283,7 @@ class Protocol:
 
         This method may read from the readahead buffer; see unread_pkt_line.
 
-        Returns: The next string from the stream, without the length prefix, or
-            None for a flush-pkt ('0000').
+        Returns: The next pkt-line from the stream as a PktLine object.
         """
         if self._readahead is None:
             read = self.read
@@ -218,10 +296,14 @@ class Protocol:
             if not sizestr:
                 raise HangupException()
             size = int(sizestr, 16)
-            if size == 0:
+            if size == 0:  # flush-pkt
                 if self.report_activity:
                     self.report_activity(4, "read")
-                return None
+                return PktLine(FLUSH_PKT_LEN)
+            elif size == 1:  # delim-pkt
+                if self.report_activity:
+                    self.report_activity(4, "read")
+                return PktLine(DELIM_PKT_LEN)
             if self.report_activity:
                 self.report_activity(size, "read")
             pkt_contents = read(size - 4)
@@ -235,7 +317,7 @@ class Protocol:
                     "Length of pkt read %04x does not match length prefix %04x"
                     % (len(pkt_contents) + 4, size)
                 )
-            return pkt_contents
+            return PktLine(size, pkt_contents)
 
     def eof(self):
         """Test whether the protocol stream has reached EOF.
@@ -263,6 +345,8 @@ class Protocol:
         Raises:
           ValueError: If more than one pkt-line is unread.
         """
+        if isinstance(data, PktLine):  # TODO(stsp): convert all callers to PktLine
+            data = data.data
         if self._readahead is not None:
             raise ValueError("Attempted to unread multiple pkt-lines.")
         self._readahead = BytesIO(pkt_line(data))
@@ -271,11 +355,11 @@ class Protocol:
         """Read a sequence of pkt-lines from the remote git process.
 
         Returns: Yields each line of data up to but not including the next
-            flush-pkt.
+            flush-pkt or delim-pkt.
         """
         pkt = self.read_pkt_line()
-        while pkt:
-            yield pkt
+        while pkt.data:
+            yield pkt.data
             pkt = self.read_pkt_line()
 
     def write_pkt_line(self, line):
@@ -326,7 +410,7 @@ class Protocol:
         Returns: A tuple of (command, [list of arguments]).
         """
         line = self.read_pkt_line()
-        return parse_cmd_pkt(line)
+        return parse_cmd_pkt(line.data)
 
 
 _RBUFSIZE = 8192  # Default read buffer size.
@@ -446,6 +530,8 @@ def extract_capabilities(text):
       text: String to extract from
     Returns: Tuple with text with capabilities removed and list of capabilities
     """
+    if isinstance(text, PktLine):  # TODO(stsp): convert all callers to PktLine
+        text = text.data
     if b"\0" not in text:
         return text, []
     text, capabilities = text.rstrip().split(b"\0")

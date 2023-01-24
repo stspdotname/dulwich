@@ -601,7 +601,7 @@ def _handle_upload_pack_tail(
 
     """
     pkt = proto.read_pkt_line()
-    while pkt:
+    while pkt and not pkt.is_flush_pkt() and not pkt.is_delim_pkt():
         parts = pkt.rstrip(b"\n").split(b" ")
         if parts[0] == b"ACK":
             graph_walker.ack(parts[1])
@@ -1230,16 +1230,16 @@ class TraditionalGitClient(GitClient):
                 pkt = proto.read_pkt_line()
             except HangupException as exc:
                 raise _remote_error_from_stderr(stderr) from exc
-            if pkt == b"NACK\n" or pkt == b"NACK":
+            if bytes(pkt) == b"NACK\n" or bytes(pkt) == b"NACK":
                 return
-            elif pkt == b"ACK\n" or pkt == b"ACK":
+            elif bytes(pkt) == b"ACK\n" or bytes(pkt) == b"ACK":
                 pass
             elif pkt.startswith(b"ERR "):
                 raise GitProtocolError(pkt[4:].rstrip(b"\n").decode("utf-8", "replace"))
             else:
                 raise AssertionError("invalid response %r" % pkt)
             ret = proto.read_pkt_line()
-            if ret is not None:
+            if not ret.is_flush_pkt():
                 raise AssertionError("expected pkt tail")
             for chan, data in _read_side_band64k_data(proto.read_pkt_seq()):
                 if chan == SIDE_BAND_CHANNEL_DATA:

@@ -54,23 +54,26 @@ class BaseProtocolTests:
     def test_read_pkt_line(self):
         self.rin.write(b"0008cmd ")
         self.rin.seek(0)
-        self.assertEqual(b"cmd ", self.proto.read_pkt_line())
+        self.assertEqual(b"cmd ", bytes(self.proto.read_pkt_line()))
 
     def test_eof(self):
         self.rin.write(b"0000")
         self.rin.seek(0)
         self.assertFalse(self.proto.eof())
-        self.assertEqual(None, self.proto.read_pkt_line())
+        pkt = self.proto.read_pkt_line()
+        self.assertTrue(pkt.is_flush_pkt())
         self.assertTrue(self.proto.eof())
         self.assertRaises(HangupException, self.proto.read_pkt_line)
 
     def test_unread_pkt_line(self):
         self.rin.write(b"0007foo0000")
         self.rin.seek(0)
-        self.assertEqual(b"foo", self.proto.read_pkt_line())
+        self.assertEqual(b"foo", bytes(self.proto.read_pkt_line()))
         self.proto.unread_pkt_line(b"bar")
-        self.assertEqual(b"bar", self.proto.read_pkt_line())
-        self.assertEqual(None, self.proto.read_pkt_line())
+        self.assertEqual(b"bar", bytes(self.proto.read_pkt_line()))
+        pkt = self.proto.read_pkt_line()
+        self.assertTrue(pkt.is_flush_pkt())
+        self.assertEqual(None, pkt.data)
         self.proto.unread_pkt_line(b"baz1")
         self.assertRaises(ValueError, self.proto.unread_pkt_line, b"baz2")
 
@@ -79,10 +82,23 @@ class BaseProtocolTests:
         self.rin.seek(0)
         self.assertEqual([b"cmd ", b"l"], list(self.proto.read_pkt_seq()))
 
-    def test_read_pkt_line_none(self):
+    def test_read_flush_pkt(self):
         self.rin.write(b"0000")
         self.rin.seek(0)
-        self.assertEqual(None, self.proto.read_pkt_line())
+        pkt = self.proto.read_pkt_line()
+        self.assertTrue(pkt.is_flush_pkt())
+        self.assertFalse(pkt.is_delim_pkt())
+        self.assertEqual(None, pkt.data)
+        self.assertEqual(0, len(pkt))
+
+    def test_read_delim_pkt(self):
+        self.rin.write(b"0001")
+        self.rin.seek(0)
+        pkt = self.proto.read_pkt_line()
+        self.assertTrue(pkt.is_delim_pkt())
+        self.assertFalse(pkt.is_flush_pkt())
+        self.assertEqual(None, pkt.data)
+        self.assertEqual(0, len(pkt))
 
     def test_read_pkt_line_wrong_size(self):
         self.rin.write(b"0100too short")
