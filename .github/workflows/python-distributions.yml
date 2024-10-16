@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, master ]
     tags:
-      - 'dulwich-*'
+      - '*'
   pull_request:
   schedule:
     - cron: "0 6 * * *" # Daily 6AM UTC build
