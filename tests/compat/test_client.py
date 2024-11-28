@@ -40,8 +40,8 @@ from urllib.parse import unquote
 
 from dulwich import client, file, index, objects, protocol, repo
 from dulwich.porcelain import tag_create
-from dulwich.refs import _import_remote_refs
 from dulwich.protocol import DEPTH_INFINITE
+from dulwich.refs import _import_remote_refs
 
 from .. import SkipTest, expectedFailure
 from .utils import (
@@ -181,7 +181,7 @@ class DulwichClientTestBase:
                 ("zop", "zop contents"),
             ]:
                 tree_id = self._add_file(src, tree_id, filename, contents)
-                commit_id = src.do_commit(
+                src.do_commit(
                     message=b"add " + filename.encode("utf-8"),
                     committer=b"Joe Example <joe@example.com>",
                     tree=tree_id,
@@ -192,7 +192,7 @@ class DulwichClientTestBase:
                 local.refs,
                 "origin",
                 result.refs,
-                f"fetch: from {remote_path}".encode('ascii')
+                f"fetch: from {remote_path}".encode("ascii"),
             )
             self.assertEqual(local.get_shallow(), set())
         with repo.Repo(self.dest) as local:
